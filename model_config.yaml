@@ -34,7 +34,6 @@ vector_stores:
     type: chroma
     options: ~
 
-
 bakeoff:
 
   search_kwargs:

@@ -1,4 +1,11 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # Generate Synthetic Evaluation Datasets for Retriever Evaluation
+# MAGIC
+# MAGIC Leverage previously chunked datasets to generate questions, answers and additional metadata to be used specfically for vector database **retriever** evaluation
+
+# COMMAND ----------
+
 # MAGIC %pip install --quiet --upgrade langchain langchain-openai openai pandas seaborn scikit-learn mlflow python-dotenv
 # MAGIC %restart_python
 
@@ -14,6 +21,12 @@ print(f"seaborn: {version('seaborn')}")
 print(f"sklearn: {version('scikit-learn')}")
 print(f"mlflow: {version('mlflow')}")
 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
+# MAGIC Load envrionment variables from **.env** files. If **OPENAI_API_KEY** is provided then **OpenAI** will be the default provider, **Databricks** will be used otherwise.
 
 # COMMAND ----------
 
@@ -53,6 +66,12 @@ print(f"generated_evaluation_table_name: {generated_evaluation_table_name}")
 print(f"num_examples: {num_examples}")
 print(f"generation_model: {generation_model}")
 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
+# MAGIC Leverage caching for LLM prompt/responses as well as embeddings.
 
 # COMMAND ----------
 

@@ -1,4 +1,10 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC
+# MAGIC # Evaluate Vector Stores
+
+# COMMAND ----------
+
 # MAGIC %pip install --quiet --upgrade  langchain langchain-community langchain-openai openai mlflow python-dotenv
 # MAGIC %pip install --quiet --upgrade langchain-chroma langchain-milvus databricks-langchain
 # MAGIC %restart_python
