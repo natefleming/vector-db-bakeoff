@@ -1,0 +1,47 @@
+
+generation:
+  num_examples: 25
+  table_name: nfleming.united_airlines.generated_evaluation
+
+chunk_source:
+  table_name: nfleming.united_airlines.documents_chunked
+  schema:
+    chunk_id_column: id
+    chunk_content_column: content
+    chunk_source_column: source
+
+models:
+  embedding_model: openai
+  chat_model: openai
+  judge_model: openai:/gpt-4
+  generation_model: gpt-4o-mini
+
+vector_stores:
+
+  databricks:
+    type: databricks
+    options:
+      endpoint: one-env-shared-endpoint-12
+      index_name: pandas_poc.paws.documents_chunked_vs_index
+      columns: 
+      - source
+
+  milvus:
+    type: milvus
+    options: ~
+
+  chroma:
+    type: chroma
+    options: ~
+
+
+bakeoff:
+
+  search_kwargs:
+    k: 5
+
+  competitors:
+  - databricks
+  - milvus
+  - chroma
+
