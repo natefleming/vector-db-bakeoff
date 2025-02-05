@@ -11,6 +11,9 @@ print(f"langchain: {version('langchain')}")
 print(f"langchain-community: {version('langchain-community')}")
 print(f"databricks-langchain: {version('databricks-langchain')}")
 print(f"openai: {version('openai')}")
+print(f"langchain-openai: {version('langchain-openai')}")
+print(f"langchain-chroma: {version('langchain-chroma')}")
+print(f"langchain-milvus: {version('langchain-milvus')}")
 print(f"mlflow: {version('mlflow')}")
 
 # COMMAND ----------
@@ -21,11 +24,121 @@ _ = load_dotenv(find_dotenv())
 
 # COMMAND ----------
 
+from typing import Any, Dict, List
+
+from mlflow.models import ModelConfig
+
+
+model_config: ModelConfig = ModelConfig(development_config="model_config.yaml")
+
+chunk_source: Dict[str, Any] = model_config.get("chunk_source")
+chunk_schema: Dict[str, str] = chunk_source.get("schema")
+
+chunk_source_table_name: str = chunk_source.get("table_name")
+chunk_id_column: str = chunk_schema.get("chunk_id_column")
+chunk_content_column: str = chunk_schema.get("chunk_content_column")
+chunk_source_column: str = chunk_schema.get("chunk_source_column")
+
+generation: Dict[str, Any] = model_config.get("generation")
+generated_evaluation_table_name: str = generation.get("table_name")
+
+models: Dict[str, str] = model_config.get("models")
+embedding_model: str = models.get("embedding_model")
+chat_model: str = models.get("chat_model")
+judge_model: str = models.get("judge_model")
+
+bakeoff: Dict[str, Any] = model_config.get("bakeoff")
+search_kwargs: Dict[str, Any] = bakeoff.get("search_kwargs")
+
+
+print(f"generated_evaluation_table_name: {generated_evaluation_table_name}")
+print(f"chunk_source_table_name: {chunk_source_table_name}")
+print(f"chunk_id_column: {chunk_id_column}")
+print(f"chunk_content_column: {chunk_content_column}")
+print(f"embedding_model: {embedding_model}")
+print(f"chat_model: {chat_model}")
+print(f"judge_model: {judge_model}")
+print(f"search_kwargs: {search_kwargs}")
+
+
+# COMMAND ----------
+
 context = dbutils.entry_point.getDbutils().notebook().getContext()
 
 workspace_host: str = spark.conf.get("spark.databricks.workspaceUrl")
 base_url: str = f"https://{workspace_host}/serving-endpoints/"
 api_key: str = context.apiToken().get()
+
+# COMMAND ----------
+
+from typing import Any, Dict, List, Optional
+
+from mlflow.models import ModelConfig 
+
+from langchain.chains.base import Chain
+from langchain_core.documents.base import Document
+from langchain_core.document_loaders.base import BaseLoader
+from langchain_community.document_loaders.pyspark_dataframe import PySparkDataFrameLoader
+from langchain_core.vectorstores.base import VectorStore
+
+
+
+from pyspark.sql import DataFrame
+
+
+def databricks_vector_search(
+  endpoint: str, 
+  index_name: str, 
+  columns: Optional[List[str]] = None) -> VectorStore:
+  from databricks_langchain import DatabricksVectorSearch
+  return DatabricksVectorSearch(endpoint=endpoint, index_name=index_name, columns=columns)
+  
+  
+def chroma_vector_search() -> VectorStore:
+  from langchain.vectorstores import Chroma
+  chunk_table_df: DataFrame = spark.table(chunk_source_table_name)
+  loader: BaseLoader = PySparkDataFrameLoader(spark, df=chunk_table_df, page_content_column=chunk_content_column)
+  texts: List[Document] = loader.load()
+  return Chroma.from_documents(texts, embeddings)
+
+
+def milvus_vector_search() -> VectorStore:
+  from langchain.vectorstores import Milvus
+  milvus_connection_uri: str = ""
+  # milvus_vs: VectorStore = Milvus.from_documents(
+  #     texts,
+  #     embeddings,
+  #     collection_name="langchain_example",
+  #     connection_args={"uri": milvus_connection_uri},
+  # )
+  return None
+
+
+class VectorStoreFactory:
+
+  def __init__(self, config: ModelConfig) -> None:
+    self.config: Dict[str, Any] = config.get("vector_stores")
+
+  def create(self, name: str) -> VectorStore:
+    config: Dict[str, Any]  = self.config.get(name)
+    vector_store_type: str = config.get("type")
+    options: Dict[str, Any] = config.get("options")
+
+    vector_store: VectorStore = None
+    match vector_store_type:
+      case "databricks":
+        vector_store = databricks_vector_search(**options)
+      case "chroma":
+        vector_store = chroma_vector_search()
+      case "milvus":
+        vector_store = milvus_vector_search()
+      case _:
+        raise ValueError(f"Unknown vector store type: {vector_store_type}")
+
+    return vector_store
+  
+
+
 
 # COMMAND ----------
 
@@ -45,7 +158,7 @@ from  langchain_core.language_models.chat_models import BaseChatModel
 
 def databricks_llm() -> BaseChatModel:
   llm: BaseChatModel = ChatOpenAI(
-    model="databricks-meta-llama-3-3-70b-instruct",
+    model=chat_model,
     base_url=base_url,
     api_key=api_key
   )  
@@ -53,7 +166,7 @@ def databricks_llm() -> BaseChatModel:
 
 
 def open_ai_llm() -> BaseChatModel:
-  llm: BaseChatModel = ChatOpenAI(model="gpt-4")
+  llm: BaseChatModel = ChatOpenAI(model=chat_model)
   return llm
 
 
@@ -89,9 +202,8 @@ def get_embeddings() -> Embeddings:
         case True:
             embeddings = OpenAIEmbeddings()
         case _:
-            print("databricks")
             embeddings: Embeddings = DatabricksEmbeddings(
-                endpoint="databricks-gte-large-en",
+                endpoint=embedding_model,
             )
     return embeddings
 
@@ -100,46 +212,18 @@ embeddings: Embeddings = get_embeddings()
 
 # COMMAND ----------
 
-from typing import List
-
-from langchain_core.document_loaders.base import BaseLoader
-from langchain_core.documents.base import Document
-
-from langchain.document_loaders import WebBaseLoader
-
-from langchain_text_splitters.base import TextSplitter
-from langchain.text_splitter import CharacterTextSplitter
-
-from langchain_openai import OpenAI, OpenAIEmbeddings
-from langchain_core.embeddings.embeddings import Embeddings
-from databricks_langchain import DatabricksEmbeddings
-
-
-#url: str = "https://mlflow.org/docs/latest/index.html"
-url: str = "https://github.com/mlflow/mlflow/blob/master/examples/llms/question_generation/mlflow_docs_scraped.csv"
-loader: BaseLoader = WebBaseLoader(url)
-documents: List[Document] = loader.load()
-
-text_splitter: TextSplitter = CharacterTextSplitter(chunk_size=1024, chunk_overlap=128)
-texts: List[Document] = text_splitter.split_documents(documents)
-
-
-
-# COMMAND ----------
-
 import pandas as pd
 
 
-OUTPUT_DF_PATH: str = "question_answer_source.csv"
-
-generated_df = pd.read_csv(OUTPUT_DF_PATH)
+generated_df: pd.DataFrame = spark.table(generated_evaluation_table_name).toPandas()
 generated_df.head(3)
 
 # COMMAND ----------
 
 # Prepare dataframe `data` with the required format
 # 
-eval_df = pd.DataFrame({})
+eval_df: pd.DataFrame = pd.DataFrame({})
+eval_df["chunk_id"] = generated_df["chunk_id"].copy(deep=True)
 eval_df["question"] = generated_df["question"].copy(deep=True)
 eval_df["source"] = generated_df["source"].apply(lambda x: [x])
 eval_df.head(3)
@@ -147,30 +231,24 @@ eval_df.head(3)
 # COMMAND ----------
 
 from langchain_core.vectorstores.base import VectorStore
-from langchain.vectorstores import Chroma
 
-chroma_vs: VectorStore = Chroma.from_documents(texts, embeddings)
-
-# COMMAND ----------
-
-from langchain_core.vectorstores.base import VectorStore
-from langchain.vectorstores import DatabricksVectorSearch
-
-#databricks_vs: VectorStore = DatabricksVectorSearch(...)
+chroma_vs: VectorStore = VectorStoreFactory(model_config).create(name="chroma")
+print(type(chroma_vs))
 
 # COMMAND ----------
 
 from langchain_core.vectorstores.base import VectorStore
-from langchain.vectorstores import Milvus
 
-milvus_connection_uri: str = ""
+databricks_vs: VectorStore = VectorStoreFactory(model_config).create(name="databricks")
+print(type(databricks_vs))
 
-# milvus_vs: VectorStore = Milvus.from_documents(
-#     texts,
-#     embeddings,
-#     collection_name="langchain_example",
-#     connection_args={"uri": milvus_connection_uri},
-# )
+# COMMAND ----------
+
+from langchain_core.vectorstores.base import VectorStore
+
+
+milvus_vs: VectorStore = VectorStoreFactory(model_config).create(name="milvus")
+print(type(milvus_vs))
 
 # COMMAND ----------
 
@@ -243,7 +321,7 @@ from langchain_core.vectorstores.base import VectorStoreRetriever
 
 def create_retriever(retriever: Union[VectorStore, VectorStoreRetriever]) -> Chain:
     if isinstance(retriever, VectorStore):
-        retriever = retriever.as_retriever(search_kwargs={"k": 5})
+        retriever = retriever.as_retriever(search_kwargs=search_kwargs)
 
     return retriever
 
@@ -252,9 +330,13 @@ def create_retriever(retriever: Union[VectorStore, VectorStoreRetriever]) -> Cha
 from typing import List
 
 
-def retrieve_doc_ids(question: str, retriever: VectorStore) -> List[str]:
+def retrieve_doc_ids(
+    question: str, 
+    retriever: VectorStore, 
+    doc_id_col: str = "source"
+) -> List[str]:
     docs: List[Document] = retriever.invoke(question)
-    return [doc.metadata["source"] for doc in docs]
+    return [doc.metadata[doc_id_col] for doc in docs]
 
 # COMMAND ----------
 
@@ -325,9 +407,9 @@ from mlflow.models.evaluation.base import (
     EvaluationResult
 )
 
-def evaluate_retriever(name: str, vector_store: VectorStore) -> pd.DataFrame:
+def evaluate_retriever(run_name: str, vector_store: VectorStore) -> pd.DataFrame:
 
-  with mlflow.start_run(run_name=name):
+  with mlflow.start_run(run_name=run_name):
     
     retriever: Chain = create_retriever(vector_store)
     
@@ -342,9 +424,11 @@ def evaluate_retriever(name: str, vector_store: VectorStore) -> pd.DataFrame:
     # Add additional metrics to be included in evaluation
     extra_metrics: List[EvaluationMetric] = [
         #relevance_metric,                       # Is this metric relevant?
+        mlflow.metrics.latency(),
         mlflow.metrics.precision_at_k(4),
+        mlflow.metrics.recall_at_k(4),
         mlflow.metrics.precision_at_k(5),
-        mlflow.metrics.latency()
+        mlflow.metrics.recall_at_k(5),
     ]
 
     # Column Mappings are required for the relevance_metric
@@ -368,6 +452,36 @@ def evaluate_retriever(name: str, vector_store: VectorStore) -> pd.DataFrame:
     print(results.metrics)
 
     return results
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
+# MAGIC # Bake Off
+
+# COMMAND ----------
+
+from datetime import datetime
+import pandas as pd
+
+from mlflow.models.evaluation.base import EvaluationResult
+
+
+time_now: datetime = datetime.now()
+run_name_suffix: str = time_now.strftime("%Y%m%d%H%M%S")
+
+bake_off: Dict[str, Any] = model_config.get("bakeoff")
+competitors: List[str] = bake_off.get("competitors")
+
+for competitor in competitors:
+  competitor: str
+
+  vector_store: VectorStore = VectorStoreFactory(model_config).create(name=competitor)
+  run_name: str = f"{competitor}-{run_name_suffix}"
+  evaluation_result: EvaluationResult = evaluate_retriever(run_name=run_name, vector_store=vector_store)
+  eval_results_table_pdf: pd.DataFrame = evaluation_result.tables["eval_results_table"]
+  display(eval_results_table_pdf)
+
 
 # COMMAND ----------
 

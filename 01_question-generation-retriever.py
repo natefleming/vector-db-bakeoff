@@ -1,6 +1,19 @@
 # Databricks notebook source
-# MAGIC %pip install --quiet --upgrade beautifulsoup4 langchain openai pandas seaborn scikit-learn python-dotenv
+# MAGIC %pip install --quiet --upgrade langchain langchain-openai openai pandas seaborn scikit-learn mlflow python-dotenv
 # MAGIC %restart_python
+
+# COMMAND ----------
+
+from importlib.metadata import version
+
+print(f"langchain: {version('langchain')}")
+print(f"langchain-openai: {version('langchain-openai')}")
+print(f"openai: {version('openai')}")
+print(f"pandas: {version('pandas')}")
+print(f"seaborn: {version('seaborn')}")
+print(f"sklearn: {version('scikit-learn')}")
+print(f"mlflow: {version('mlflow')}")
+
 
 # COMMAND ----------
 
@@ -10,8 +23,42 @@ _ = load_dotenv(find_dotenv())
 
 # COMMAND ----------
 
+from typing import Any, Dict, List
+
+from mlflow.models import ModelConfig
+
+
+model_config: ModelConfig = ModelConfig(development_config="model_config.yaml")
+
+chunk_source: Dict[str, Any] = model_config.get("chunk_source")
+chunk_schema: Dict[str, str] = chunk_source.get("schema")
+
+chunk_source_table_name: str = chunk_source.get("table_name")
+chunk_id_column: str = chunk_schema.get("chunk_id_column")
+chunk_content_column: str = chunk_schema.get("chunk_content_column")
+chunk_source_column: str = chunk_schema.get("chunk_source_column")
+
+generation: Dict[str, Any] = model_config.get("generation")
+num_examples: int = int(generation.get("num_examples"))
+generated_evaluation_table_name: str = generation.get("table_name")
+
+models: Dict[str, str] = model_config.get("models")
+generation_model: str = models.get("generation_model")
+
+print(f"chunk_source_table_name: {chunk_source_table_name}")
+print(f"chunk_id_column: {chunk_id_column}")
+print(f"chunk_content_column: {chunk_content_column}")
+print(f"chunk_source_column: {chunk_source_column}")
+print(f"generated_evaluation_table_name: {generated_evaluation_table_name}")
+print(f"num_examples: {num_examples}")
+print(f"generation_model: {generation_model}")
+
+
+# COMMAND ----------
+
 import json
 import os
+from os import PathLike
 
 # For cost-saving, create a cache for the LLM responses
 import threading
@@ -25,7 +72,6 @@ import pandas as pd
 # For scraping
 import requests
 import seaborn as sns
-from bs4 import BeautifulSoup
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from sklearn.decomposition import PCA
@@ -33,7 +79,7 @@ from sklearn.manifold import TSNE
 
 
 class Cache:
-    def __init__(self, persist_path, cache_loading_fn):
+    def __init__(self, persist_path: PathLike, cache_loading_fn):
         """
         The cache_loading_fn should be a function that takes arbitrary
         serializable arguments and returns a serilaizable value.
@@ -44,6 +90,9 @@ class Cache:
             result = openai.chat.completions.create(**kwargs)
             return result.to_dict_recursive()
         """
+        if isinstance(persist_path, Path):
+            persist_path = persist_path.as_posix()
+            
         self._cache = self._get_or_create_cache_dict(persist_path)
         self._persist_path = persist_path
         self._cache_loading_fn = cache_loading_fn
@@ -89,7 +138,7 @@ def chat_completion_create_fn(**kwargs):
     return result.to_dict()
 
 
-def cached_openai_ChatCompletion_create(**kwargs):
+def cached_openai_chat_completion_create(**kwargs):
     cache = kwargs.pop("cache")
     return cache.get_from_cache_or_load_cache(**kwargs)
 
@@ -106,118 +155,24 @@ def cached_langchain_openai_embeddings(**kwargs):
 
 # COMMAND ----------
 
+from typing import Any, Dict
+from pathlib import Path
+
 # Other configurations
 
 # Choose a seed for reproducible results
-SEED = 2023
+seed: int = 123
 
 # For cost-saving purposes, choose a path to persist the responses for LLM calls
-CACHE_PATH = "_cache.json"
-EMBEDDINGS_CACHE_PATH = "_embeddings_cache.json"
+cache_path: Path = "_cache.json"
+embeddings_cache_path: Path = "_embeddings_cache.json"
 
-# To avoid re-running the scraping process, choose a path to save the scrapped docs
-SCRAPPED_DATA_PATH = "mlflow_docs_scraped.csv"
-
-# Choose a path to save the generated dataset
-OUTPUT_DF_PATH = "question_answer_source.csv"
 
 
 # COMMAND ----------
 
-cache = Cache(CACHE_PATH, chat_completion_create_fn)
-embeddings_cache = Cache(EMBEDDINGS_CACHE_PATH, embeddings_embed_documents_fn)
-
-
-# COMMAND ----------
-
-CHUNK_SIZE = 1500
-
-
-# COMMAND ----------
-
-page = requests.get("https://mlflow.org/docs/latest/index.html")
-soup = BeautifulSoup(page.content, "html.parser")
-
-mainLocation = "https://mlflow.org/docs/latest/"
-header = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11",
-    "Accept-Language": "en-US,en;q=0.8",
-    "Connection": "keep-alive",
-}
-
-data = []
-for a_link in soup.find_all("a"):
-    document_url = mainLocation + a_link["href"]
-    page = requests.get(document_url, headers=header)
-    soup = BeautifulSoup(page.content, "html.parser")
-    file_to_store = a_link.get("href")
-    if soup.find("div", {"class": "rst-content"}):
-        data.append(
-            [
-                file_to_store,
-                soup.find("div", {"class": "rst-content"}).text.replace("\n", " "),
-            ]
-        )
-
-df = pd.DataFrame(data, columns=["source", "text"])
-
-display(df)
-
-# COMMAND ----------
-
-df.to_csv(SCRAPPED_DATA_PATH, index=False)
-df = pd.read_csv(SCRAPPED_DATA_PATH)
-
-
-# COMMAND ----------
-
-# For demonstration purposes, let's pick 5 popular MLflow documantation pages from the dataset
-mask = df["source"].isin(
-    {
-        "tracking.html",
-        "models.html",
-        "model-registry.html",
-        "search-runs.html",
-        "projects.html",
-    }
-)
-sub_df = df[mask]
-
-# Split documents into chunks
-text_splitter = CharacterTextSplitter(chunk_size=CHUNK_SIZE, separator=" ")
-
-
-def get_chunks(input_row):
-    new_rows = []
-    chunks = text_splitter.split_text(input_row["text"])
-    for i, chunk in enumerate(chunks):
-        new_rows.append({"chunk": chunk, "source": input_row["source"], "chunk_index": i})
-    return new_rows
-
-
-expanded_df = pd.DataFrame(columns=["chunk", "source", "chunk_index"])
-
-for index, row in sub_df.iterrows():
-    new_rows = get_chunks(row)
-    expanded_df = pd.concat([expanded_df, pd.DataFrame(new_rows)], ignore_index=True)
-
-expanded_df.head(3)
-
-
-# COMMAND ----------
-
-# For cost-saving purposes, let's pick the first 3 chunks from each doc
-# To generate questions with more chunks, change the start index and end index in iloc[]
-start, end = 0, 3
-filtered_df = (
-    expanded_df.groupby("source").apply(lambda x: x.iloc[start:end]).reset_index(drop=True)
-)
-filtered_df.head(3)
-
-
-# COMMAND ----------
-
-filtered_df["chunk"][0]
+cache: Cache = Cache(cache_path, chat_completion_create_fn)
+embeddings_cache: Cache = Cache(embeddings_cache_path, embeddings_embed_documents_fn)
 
 
 # COMMAND ----------
@@ -257,13 +212,13 @@ def get_raw_response(content):
         },
     }
 
-    return cached_openai_ChatCompletion_create(
+    return cached_openai_chat_completion_create(
         messages=messages,
-        model="gpt-4o-mini",
+        model=generation_model,
         functions=[submit_function],
         function_call="auto",
         temperature=0.0,
-        seed=SEED,
+        seed=seed,
         cache=cache,
     )
 
@@ -284,21 +239,58 @@ def generate_question_answer(content):
 
 # COMMAND ----------
 
-queries = []
+from pyspark.sql import DataFrame
+import random
+
+def sample_rows(df: DataFrame, n: int, seed: int = None) -> DataFrame:
+    """
+    Sample n rows from the DataFrame.
+    
+    Parameters:
+    df (DataFrame): The DataFrame to sample from.
+    n (int): The number of rows to sample.
+    seed (int, optional): The seed for the random number generator.
+    
+    Returns:
+    DataFrame: A DataFrame with n sampled rows.
+    """
+    fraction: float = n / df.count()
+    sampled_df: DataFrame = df.sample(withReplacement=False, fraction=fraction, seed=seed)
+    return sampled_df.limit(n)
+  
+
+# COMMAND ----------
+
+from pyspark.sql import DataFrame
+import pandas as pd
+
+
+chunks_df: DataFrame = spark.table(chunk_source_table_name)
+
+sampled_df: DataFrame = sample_rows(chunks_df, num_examples, seed=seed)
+
+filtered_pdf: pd.DataFrame = sampled_df.toPandas()
+
+display(filtered_pdf)
+
+# COMMAND ----------
+
+
+get_raw_response(filtered_pdf[chunk_content_column][0])
+
 
 
 # COMMAND ----------
 
-get_raw_response(filtered_df["chunk"][0])
+from typing import List, Dict
 
+queries: List[Dict[str, str]] = []
 
-
-# COMMAND ----------
-
-# The requests sometimes get ratelimited, you can re-execute this cell without losing the existing results.
-n = len(filtered_df)
-for i, row in filtered_df.iterrows():
-    chunk = row["chunk"]
+n: int = len(filtered_pdf)
+for i, row in filtered_pdf.iterrows():
+    chunk: str = row[chunk_content_column]
+    question: str
+    answer: str
     question, answer = generate_question_answer(chunk)
     print(f"{i+1}/{n}: {question}")
     queries.append(
@@ -306,47 +298,27 @@ for i, row in filtered_df.iterrows():
             "question": question,
             "answer": answer,
             "chunk": chunk,
-            "chunk_id": row["chunk_index"],
-            "source": row["source"],
+            "chunk_id": row[chunk_id_column],
+            "source": row[chunk_source_column],
         }
     )
 
 
 # COMMAND ----------
 
-result_df = pd.DataFrame(queries)
-result_df = result_df[result_df["answer"] != "N/A"]
-
-
-# COMMAND ----------
-
-def add_to_output_df(result_df=pd.DataFrame({})):
-    """
-    This function adds the records in result_df to the existing records saved at OUTPUT_DF_PATH,
-    remove the duplicate rows and save the new collection of records back to OUTPUT_DF_PATH.
-    """
-    if os.path.exists(OUTPUT_DF_PATH):
-        all_result_df = pd.read_csv(OUTPUT_DF_PATH)
-    else:
-        all_result_df = pd.DataFrame({})
-    all_result_df = (
-        pd.concat([all_result_df, result_df], ignore_index=True)
-        .drop_duplicates()
-        .sort_values(by=["source", "chunk_id"])
-        .reset_index(drop=True)
-    )
-    all_result_df.to_csv(OUTPUT_DF_PATH, index=False)
-    return all_result_df
-
+result_pdf = pd.DataFrame(queries)
+result_pdf = result_pdf[result_pdf["answer"] != "N/A"]
+display(result_pdf)
 
 # COMMAND ----------
 
-all_result_df = add_to_output_df(result_df)
-
+result_df: DataFrame = spark.createDataFrame(result_pdf)
+result_df.write.format("delta").mode("overwrite").saveAsTable(generated_evaluation_table_name)
 
 # COMMAND ----------
 
-all_result_df.head(3)
+all_result_pdf: pd.DataFrame = spark.table(generated_evaluation_table_name).toPandas()
+all_result_pdf.head(3)
 
 
 # COMMAND ----------
@@ -362,7 +334,7 @@ all_result_df.head(3)
 # COMMAND ----------
 
 # Length
-questions = all_result_df["question"].to_list()
+questions = all_result_pdf["question"].to_list()
 question_len = pd.DataFrame([len(q) for q in questions], columns=["length"])
 question_len.hist(bins=5)
 plt.title("Histogram of Question Lengths")
@@ -408,7 +380,8 @@ question_embeddings = embeddings.embed_documents(questions_to_embed)
 pca = PCA(n_components=10)
 question_embeddings_reduced = pca.fit_transform(question_embeddings)
 # TSNE on embeddings to reduce to 2-dim
-tsne = TSNE(n_components=2, random_state=SEED)
+perplexity = min(30, question_embeddings_reduced.shape[0] - 1)
+tsne = TSNE(n_components=2, random_state=seed, perplexity=perplexity)
 lower_dim_embeddings = tsne.fit_transform(question_embeddings_reduced)
 
 
@@ -428,16 +401,16 @@ sns.scatterplot(data=data, x="x", y="y", hue="label")
 
 # COMMAND ----------
 
-all_result_df.sample(3)
+all_result_pdf.sample(3)
 
 
 # COMMAND ----------
 
-embedded_queries = all_result_df.copy()
-embedded_queries["chunk_emb"] = all_result_df["chunk"].apply(
+embedded_queries = all_result_pdf.copy()
+embedded_queries["chunk_emb"] = all_result_pdf["chunk"].apply(
     lambda x: np.squeeze(cached_langchain_openai_embeddings(chunk=x, cache=embeddings_cache))
 )
-embedded_queries["question_emb"] = all_result_df["question"].apply(
+embedded_queries["question_emb"] = all_result_pdf["question"].apply(
     lambda x: np.squeeze(cached_langchain_openai_embeddings(chunk=x, cache=embeddings_cache))
 )
 

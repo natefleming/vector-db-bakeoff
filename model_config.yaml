@@ -42,6 +42,5 @@ bakeoff:
 
   competitors:
   - databricks
-  - milvus
   - chroma
 

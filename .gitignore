@@ -1,5 +1,7 @@
-# Created by https://www.toptal.com/developers/gitignore/api/python,macos,vim,venv,dotenv,visualstudiocode
-# Edit at https://www.toptal.com/developers/gitignore?templates=python,macos,vim,venv,dotenv,visualstudiocode
+# Application Artifacts
+
+*.json
+*.csv
 
 ### dotenv ###
 .env
