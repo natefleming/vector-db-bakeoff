@@ -1,6 +1,6 @@
 # vector-db-bakeoff
 
-This project generates synthetic evaluation datasets for **VectorStoreRetriever** evaluation using previously chunked datasets. It leverages various tools and libraries to **generate synthetic questions**, **answers**, and **additional metadata** for vector database retriever evaluation.  
+This project generates synthetic evaluation datasets for **VectorStoreRetriever** evaluation using chunked documents. It leverages various tools and libraries to **generate synthetic questions**, **answers**, and **additional metadata** for vector database retriever evaluation.  
 **Evaluation** leverages the **mlflow** evaluation api for metric tracking and the **langchain** **VectorStoreRetriever** interface for execution.
 
 ## Prerequisites
