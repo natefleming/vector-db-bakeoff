@@ -6,6 +6,17 @@ This utility generates **synthetic** test questions and answers to benchmark ret
 
 Additionally, it allows users to configure and track key performance metrics such as latency, precision, and recall at different levels (e.g., **precision_at_k(4)**, **recall_at_k(5)**). It also supports custom evaluation metrics, ensuring flexibility in assessing retrieval quality. Built on **MLflow** evaluation, it provides easy tracking and comparison, helping teams identify the best performing vector database for AI-driven search and retrieval use cases.
 
+
+## Use Cases
+
+This tool can be used to:
+
+* Compare vector database performance to determine the best option for AI-driven retrieval.
+* Optimize retrieval strategies by tuning hyperparameters like chunk size, overlap, and indexing methods.
+* Measure precision, recall, and latency to understand how well a database retrieves relevant results.
+* Validate the impact of different vector storage solutions on overall application performance.
+* Develop and test custom evaluation metrics to align with specific business needs.
+
 ## Prerequisites
 
 The framework assumes that each target Vector Store has been populated individually using identical hyperparameters (ie chunk size, overlap, strategy)  
