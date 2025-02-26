@@ -1,7 +1,10 @@
 # vector-db-bakeoff
 
-This project generates synthetic evaluation datasets for **VectorStoreRetriever** evaluation using chunked documents. It leverages various tools and libraries to **generate synthetic questions**, **answers**, and **additional metadata** for vector database retriever evaluation.  
-**Evaluation** leverages the **mlflow** evaluation api for metric tracking and the **langchain** **VectorStoreRetriever** interface for execution.
+**Databricks** has developed tools to evaluate how well Generative AI applications perform, including their ability to retrieve relevant information. While our existing tools assess overall AI application quality, this project focuses specifically on **vector database** performance—measuring how efficiently different databases retrieve information.
+
+This utility generates test questions and answers to benchmark retrieval performance across various vector databases. It helps fine-tune parameters like **chunk size** and **overlap** while providing **side-by-side** comparisons of different database implementations.
+
+Additionally, it allows users to configure and track key performance metrics such as latency, precision, and recall at different levels (e.g., **precision_at_k(4)**, **recall_at_k(5)**). It also supports custom evaluation metrics, ensuring flexibility in assessing retrieval quality. Built on **MLflow** evaluation, it provides easy tracking and comparison, helping teams identify the best-performing vector database for AI-driven search and retrieval use cases.
 
 ## Prerequisites
 
